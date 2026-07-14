@@ -1,0 +1,14 @@
+# clasp push で Apps Script に送らないファイル
+# （送るのは Code.gs / appsscript.json / 各 *.html のみ）
+
+# ドキュメント類
+**/*.md
+
+# 単体プレビュー用プロトタイプ（clasp対象外）
+index.html
+
+# 開発環境
+.git/**
+node_modules/**
+.clasp.json
+.claspignore
