@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@500;600;700&display=swap" rel="stylesheet">
+<?!= include('styles'); ?>
+</head>
+<body>
+<header class="masthead">
+  <p class="eyebrow">特定技能 受入支援 ｜ 定期面談レポート</p>
+  <h1 id="facName"></h1>
+  <p class="sub" id="facMeta"></p>
+  <span class="formref">参考様式第5-5号 準拠</span>
+</header>
+
+<section class="summary c4" id="summary"></section>
+
+<main>
+  <div class="toolbar">
+    <div class="filters" id="filters">
+      <button class="chip-btn active" data-f="all">全員</button>
+      <button class="chip-btn" data-f="overdue">面談が必要</button>
+      <button class="chip-btn" data-f="bad">法令違反</button>
+    </div>
+    <span class="hint">対象者の行をタップで面談票を表示</span>
+  </div>
+  <div id="list"></div>
+  <p class="gen" id="gen"></p>
+</main>
+
+<div class="overlay" id="overlay" role="dialog" aria-modal="true"><div class="modal" id="modal"></div></div>
+<?!= include('appjs'); ?>
+<script>
+  var DATA = <?!= data ?>;
+  ITEMS = DATA.items;
+  var FAC = { id:DATA.facility.id, name:DATA.facility.name, area:DATA.facility.area, org:DATA.facility.org,
+              workers:DATA.workers, total:DATA.workers.length,
+              warn:DATA.workers.filter(function(w){return w.status==='warn';}).length,
+              bad:DATA.workers.filter(function(w){return w.status==='bad';}).length };
+
+  document.getElementById('facName').textContent = FAC.name;
+  document.getElementById('facMeta').textContent = (FAC.area||'') + (FAC.org?'　｜　所属機関：'+FAC.org:'');
+  document.getElementById('gen').textContent = '最終更新：'+DATA.generatedAt;
+
+  var overdue = FAC.workers.filter(function(w){return w.dueState==='overdue'||w.dueState==='soon';}).length;
+  document.getElementById('summary').innerHTML =
+    '<div class="stat"><div class="label">対象者（特定技能1号）</div><div class="num">'+FAC.total+'<small> 名</small></div></div>'+
+    '<div class="stat t-warn"><div class="label">問題あり</div><div class="num">'+FAC.warn+'<small> 名</small></div></div>'+
+    '<div class="stat t-bad"><div class="label">法令違反</div><div class="num">'+FAC.bad+'<small> 名</small></div></div>'+
+    '<div class="stat t-over"><div class="label">面談が必要（期限切れ・間近）</div><div class="num">'+overdue+'<small> 名</small></div></div>';
+
+  var FILTER='all';
+  function passes(w){ if(FILTER==='all')return true; if(FILTER==='overdue')return w.dueState==='overdue'||w.dueState==='soon'; return w.status===FILTER; }
+  function render(){
+    var view={id:FAC.id,name:FAC.name,area:FAC.area,org:FAC.org,workers:FAC.workers.filter(passes),
+              total:FAC.total,warn:FAC.warn,bad:FAC.bad};
+    document.getElementById('list').innerHTML = view.workers.length? facilityCard(view) :
+      '<div class="facility"><div class="empty">該当する対象者はいません。</div></div>';
+    var card=document.getElementById('fac-'+FAC.id); if(card)card.classList.add('open');
+  }
+  document.getElementById('filters').addEventListener('click',function(e){
+    var b=e.target.closest('.chip-btn'); if(!b)return;
+    document.querySelectorAll('.chip-btn').forEach(function(x){x.classList.remove('active');});
+    b.classList.add('active'); FILTER=b.dataset.f; render();
+  });
+  document.getElementById('overlay').addEventListener('click',function(e){if(e.target.id==='overlay')closeModal();});
+  render();
+</script>
+</body>
+</html>

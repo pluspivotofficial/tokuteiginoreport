@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@500;600;700&display=swap" rel="stylesheet">
+<?!= include('styles'); ?>
+</head>
+<body>
+<header class="masthead">
+  <p class="eyebrow">特定技能 受入支援 ｜ コンプライアンス</p>
+  <h1>定期面談 管理ページ（全施設）</h1>
+  <p class="sub">面談記録の入力・人材追加と、施設横断の面談状況を管理します</p>
+  <span class="formref">参考様式第5-5号 準拠</span>
+</header>
+
+<section class="summary c5" id="summary"></section>
+
+<main>
+  <div id="alerts"></div>
+
+  <div class="section-title">面談を入力する</div>
+  <div class="panel">
+    <h3>定期面談の記録</h3>
+    <div class="grid2">
+      <div class="field"><label>施設</label><select id="r_fid"></select></div>
+      <div class="field"><label>対象者</label><select id="r_pid"></select></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>面談日</label><input type="date" id="r_date"></div>
+      <div class="field"><label>対応者の氏名</label><input id="r_resp" placeholder="例：法務 花子"></div>
+    </div>
+    <div class="field"><label>対応者の役職</label><input id="r_role" value="支援担当者（主任）"></div>
+
+    <div class="field"><label>問題があった項目だけチェック（既定はすべて「問題なし＝無」）</label>
+      <div id="r_items"></div>
+    </div>
+
+    <label class="switch" style="margin:6px 0 4px;"><input type="checkbox" id="r_vio_on"> 法令違反として記録する（様式4の詳細を入力）</label>
+    <details class="viobox hidden" id="r_vio_box" open>
+      <summary>法令違反等への対応</summary>
+      <div class="grid2" style="margin-top:8px;">
+        <div class="field"><label>①発生年月日</label><input type="date" id="v_occ"></div>
+        <div class="field"><label>ア 本人への対応</label><input id="v_a" value="労働基準監督署等の関係行政機関を案内"></div>
+      </div>
+      <div class="field"><label>②違反事実の内容</label><textarea id="v_detail"></textarea></div>
+      <div class="grid2">
+        <div class="field"><label>イ 責任者への通知</label><input id="v_ntf" value="通知済み"></div>
+        <div class="field"><label>イ 通知日</label><input type="date" id="v_ntfd"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>イ 通知先</label><input id="v_ntft" placeholder="例：代表取締役・◯◯"></div>
+        <div class="field"><label>イ 入管への届出案内</label><input id="v_imm" value="案内済み"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>ウ 関係機関への通報</label><input id="v_rep" value="通報済み"></div>
+        <div class="field"><label>ウ 通報日</label><input type="date" id="v_repd"></div>
+      </div>
+      <div class="field"><label>ウ 通報先</label><input id="v_repo" placeholder="例：東京出入国在留管理局"></div>
+    </details>
+
+    <div style="margin-top:12px;"><button class="btn" id="r_submit">面談記録を保存</button></div>
+    <div class="form-msg" id="r_msg"></div>
+  </div>
+
+  <div class="section-title">人材を追加する</div>
+  <div class="panel">
+    <h3>新しい特定技能人材の登録</h3>
+    <div class="grid2">
+      <div class="field"><label>施設</label><select id="w_fid"></select></div>
+      <div class="field"><label>氏名（ローマ字）</label><input id="w_name" placeholder="例：NGUYEN VAN A"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>国籍</label><input id="w_nat"></div>
+      <div class="field"><label>在留資格</label><input id="w_zai" value="特定技能1号"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>配属日</label><input type="date" id="w_join"></div>
+      <div class="field"><label>備考</label><input id="w_memo"></div>
+    </div>
+    <div style="margin-top:6px;"><button class="btn" id="w_submit">人材を追加</button></div>
+    <div class="form-msg" id="w_msg"></div>
+  </div>
+
+  <div class="section-title">施設ごとの面談状況</div>
+  <div class="toolbar">
+    <div class="filters" id="filters">
+      <button class="chip-btn active" data-f="all">すべて</button>
+      <button class="chip-btn" data-f="overdue">面談が必要な施設</button>
+      <button class="chip-btn" data-f="bad">法令違反あり</button>
+    </div>
+    <span class="hint">施設名で対象者一覧 ／ 行で面談票</span>
+  </div>
+  <div id="facList"></div>
+  <p class="gen" id="gen"></p>
+</main>
+
+<div class="overlay" id="overlay" role="dialog" aria-modal="true"><div class="modal" id="modal"></div></div>
+<?!= include('appjs'); ?>
+<script>
+  var DATA = <?!= data ?>;
+  ITEMS = DATA.items;
+  var FACS = DATA.facilities;
+  var ALLW = []; FACS.forEach(function(f){ f.workers.forEach(function(w){ ALLW.push({id:w.id,fid:f.id,name:w.name}); }); });
+
+  /* サマリー */
+  var t={fac:FACS.length,tot:0,warn:0,bad:0,over:0};
+  FACS.forEach(function(f){ t.tot+=f.total; t.warn+=f.warn; t.bad+=f.bad; t.over+=f.overdue; });
+  document.getElementById('summary').innerHTML=
+    '<div class="stat"><div class="label">施設</div><div class="num">'+t.fac+'<small> 施設</small></div></div>'+
+    '<div class="stat"><div class="label">対象者</div><div class="num">'+t.tot+'<small> 名</small></div></div>'+
+    '<div class="stat t-warn"><div class="label">問題あり</div><div class="num">'+t.warn+'<small> 名</small></div></div>'+
+    '<div class="stat t-bad"><div class="label">法令違反</div><div class="num">'+t.bad+'<small> 名</small></div></div>'+
+    '<div class="stat t-over"><div class="label">面談が必要</div><div class="num">'+t.over+'<small> 名</small></div></div>';
+  document.getElementById('gen').textContent='最終更新：'+DATA.generatedAt;
+
+  /* アラート（期限切れ・間近） */
+  var due=[];
+  FACS.forEach(function(f){ f.workers.forEach(function(w){
+    if(w.dueState==='overdue'||w.dueState==='soon') due.push({facName:f.name,name:w.name,nextDue:w.nextDue,state:w.dueState,id:w.id});
+  });});
+  due.sort(function(a,b){ return (a.state==='overdue'?0:1)-(b.state==='overdue'?0:1); });
+  if(due.length){
+    var hasOver=due.some(function(d){return d.state==='overdue';});
+    document.getElementById('alerts').innerHTML=
+      '<div class="alert-card'+(hasOver?'':' soon')+'"><h3>面談が必要な対象者（'+due.length+'名）</h3>'+
+      due.map(function(d){return '<div class="alert-row"><span>'+esc(d.facName)+'　／　'+esc(d.name)+'</span>'+
+        '<span class="due '+d.state+'">'+esc(d.nextDue)+(d.state==='overdue'?'（期限切れ）':'（間近）')+'</span></div>';}).join('')+'</div>';
+  }
+
+  /* 施設アコーディオン */
+  var FILTER='all';
+  function facPasses(f){ if(FILTER==='all')return true; if(FILTER==='overdue')return (f.overdue||0)>0; if(FILTER==='bad')return f.bad>0; return true; }
+  function renderFacs(){
+    var shown=FACS.filter(facPasses);
+    document.getElementById('facList').innerHTML = shown.length?
+      shown.map(function(f){return facilityCard(f,{showDue:true});}).join('') :
+      '<div class="facility"><div class="empty">該当する施設はありません。</div></div>';
+  }
+  document.getElementById('filters').addEventListener('click',function(e){
+    var b=e.target.closest('.chip-btn'); if(!b)return;
+    document.querySelectorAll('.chip-btn').forEach(function(x){x.classList.remove('active');});
+    b.classList.add('active'); FILTER=b.dataset.f; renderFacs();
+  });
+  document.getElementById('overlay').addEventListener('click',function(e){if(e.target.id==='overlay')closeModal();});
+  renderFacs();
+
+  /* ---- フォーム初期化 ---- */
+  function fillFacSelect(sel){ sel.innerHTML=FACS.map(function(f){return '<option value="'+f.id+'">'+esc(f.name)+'</option>';}).join(''); }
+  fillFacSelect(document.getElementById('r_fid'));
+  fillFacSelect(document.getElementById('w_fid'));
+  function fillWorkerSelect(){
+    var fid=document.getElementById('r_fid').value;
+    var ws=ALLW.filter(function(w){return w.fid===fid;});
+    document.getElementById('r_pid').innerHTML = ws.length?
+      ws.map(function(w){return '<option value="'+w.id+'">'+esc(w.name)+'</option>';}).join('') :
+      '<option value="">（対象者なし）</option>';
+  }
+  document.getElementById('r_fid').addEventListener('change',fillWorkerSelect);
+  fillWorkerSelect();
+
+  /* 18項目チェックリスト */
+  (function(){
+    var html='', cur='';
+    ITEMS.forEach(function(it){
+      if(it.cat!==cur){ html+='<div style="font-size:11.5px;color:var(--ink-mute);margin:8px 0 2px;">'+esc(it.cat)+'</div>'; cur=it.cat; }
+      html+='<div class="item-check"><input type="checkbox" id="chk_'+it.code+'" data-code="'+it.code+'">'+
+        '<div class="ic-note"><label for="chk_'+it.code+'" style="cursor:pointer;">'+esc(it.label)+'</label>'+
+        '<input class="note-in hidden" id="note_'+it.code+'" placeholder="問題の内容"></div></div>';
+    });
+    document.getElementById('r_items').innerHTML=html;
+    ITEMS.forEach(function(it){
+      document.getElementById('chk_'+it.code).addEventListener('change',function(){
+        document.getElementById('note_'+it.code).classList.toggle('hidden',!this.checked);
+      });
+    });
+  })();
+
+  /* 法令違反トグル */
+  document.getElementById('r_vio_on').addEventListener('change',function(){
+    document.getElementById('r_vio_box').classList.toggle('hidden',!this.checked);
+  });
+
+  /* 面談記録 保存 */
+  document.getElementById('r_submit').addEventListener('click',function(){
+    var btn=this, msg=document.getElementById('r_msg'); msg.className='form-msg'; msg.textContent='';
+    var problems=[];
+    ITEMS.forEach(function(it){ if(document.getElementById('chk_'+it.code).checked){
+      problems.push({code:it.code,note:document.getElementById('note_'+it.code).value}); }});
+    var form={
+      fid:document.getElementById('r_fid').value, pid:document.getElementById('r_pid').value,
+      date:document.getElementById('r_date').value, respondent:document.getElementById('r_resp').value,
+      role:document.getElementById('r_role').value, problems:problems, other:'特になし。',
+      madeOn:document.getElementById('r_date').value, violation:null
+    };
+    if(document.getElementById('r_vio_on').checked){
+      form.violation={
+        occurred:document.getElementById('v_occ').value, detail:document.getElementById('v_detail').value,
+        a:document.getElementById('v_a').value, notifyDone:document.getElementById('v_ntf').value,
+        notifyDate:document.getElementById('v_ntfd').value, notifyTo:document.getElementById('v_ntft').value,
+        immigGuide:document.getElementById('v_imm').value, reportDone:document.getElementById('v_rep').value,
+        reportDate:document.getElementById('v_repd').value, reportOffice:document.getElementById('v_repo').value
+      };
+    }
+    if(!form.fid||!form.pid||!form.date){ msg.className='form-msg err'; msg.textContent='施設・対象者・面談日は必須です。'; return; }
+    btn.disabled=true; btn.textContent='保存中…';
+    google.script.run.withSuccessHandler(function(res){
+      msg.className='form-msg ok'; msg.textContent='保存しました（記録ID：'+res.id+'）。最新の状態に更新します…';
+      setTimeout(function(){location.reload();},1200);
+    }).withFailureHandler(function(err){
+      btn.disabled=false; btn.textContent='面談記録を保存'; msg.className='form-msg err'; msg.textContent='エラー：'+err.message;
+    }).addRecord(form);
+  });
+
+  /* 人材 追加 */
+  document.getElementById('w_submit').addEventListener('click',function(){
+    var btn=this, msg=document.getElementById('w_msg'); msg.className='form-msg'; msg.textContent='';
+    var form={ fid:document.getElementById('w_fid').value, name:document.getElementById('w_name').value,
+      nat:document.getElementById('w_nat').value, zairyu:document.getElementById('w_zai').value,
+      joined:document.getElementById('w_join').value, memo:document.getElementById('w_memo').value };
+    if(!form.fid||!form.name){ msg.className='form-msg err'; msg.textContent='施設と氏名は必須です。'; return; }
+    btn.disabled=true; btn.textContent='追加中…';
+    google.script.run.withSuccessHandler(function(res){
+      msg.className='form-msg ok'; msg.textContent='追加しました（人材ID：'+res.id+'）。最新の状態に更新します…';
+      setTimeout(function(){location.reload();},1200);
+    }).withFailureHandler(function(err){
+      btn.disabled=false; btn.textContent='人材を追加'; msg.className='form-msg err'; msg.textContent='エラー：'+err.message;
+    }).addWorker(form);
+  });
+</script>
+</body>
+</html>

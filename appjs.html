@@ -1,0 +1,127 @@
+<script>
+/* ===== 共有レンダリング（施設ページ・管理ページ共通） ===== */
+var LABEL={ok:'問題なし',warn:'問題あり',bad:'法令違反',none:'未実施'};
+var ITEMS=[];           // [{code,cat,label}]
+var WMAP={};            // 人材ID -> workerモデル（モーダル表示用）
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+function statusBadge(s){return '<span class="badge '+s+'">'+LABEL[s]+'</span>';}
+
+function dueCell(w){
+  if(w.dueState==='none'||!w.nextDue) return '<span class="dash">—</span>';
+  var txt=w.nextDue+(w.dueState==='overdue'?'（期限切れ）':w.dueState==='soon'?'（間近）':'');
+  return '<span class="due '+w.dueState+'">'+esc(txt)+'</span>';
+}
+
+/* 施設1件分の対象者テーブル行 */
+function workerRows(fac){
+  return fac.workers.map(function(w){
+    WMAP[w.id]={w:w,facName:fac.name};
+    var prob = w.status==='bad' ? '法令違反 1件'
+             : (w.latest && w.latest.problems.length) ? (w.latest.problems.length+'件')
+             : (w.status==='none' ? '<span class="dash">未実施</span>' : '<span class="dash">—</span>');
+    return '<tr onclick="openRecord(\''+w.id+'\')">'+
+      '<td class="w-name" data-l="氏名">'+esc(w.name)+'<span class="nat">'+esc(w.nat)+'</span></td>'+
+      '<td data-l="最終面談">'+(w.latest?esc(w.latest.date):'<span class="dash">—</span>')+'</td>'+
+      '<td data-l="次回予定">'+dueCell(w)+'</td>'+
+      '<td class="col-c" data-l="問題">'+prob+'</td>'+
+      '<td class="col-c" data-l="判定">'+statusBadge(w.status)+'</td>'+
+      '<td class="col-c"><span class="view-link">面談票 ›</span></td></tr>';
+  }).join('');
+}
+
+function facilityCard(fac,opts){
+  opts=opts||{};
+  var strip=fac.workers.map(function(w){return '<span class="s-'+w.status+'"></span>';}).join('');
+  var counts='<div class="c"><b>'+fac.total+'</b>対象者</div>'+
+             '<div class="c warn"><b>'+fac.warn+'</b>問題あり</div>'+
+             '<div class="c bad"><b>'+fac.bad+'</b>法令違反</div>';
+  if(opts.showDue) counts+='<div class="c over"><b>'+(fac.overdue||0)+'</b>期限切れ</div>';
+  return '<div class="facility" id="fac-'+fac.id+'">'+
+    '<div class="strip">'+strip+'</div>'+
+    '<div class="fac-head" onclick="toggleFac(\''+fac.id+'\')">'+
+      '<div><div class="fac-name">'+esc(fac.name)+'</div>'+
+      '<div class="fac-meta">'+esc(fac.area||'')+(fac.org?'　｜　所属機関：'+esc(fac.org):'')+'</div></div>'+
+      '<div class="fac-right"><div class="fac-counts">'+counts+'</div><div class="toggle">▾</div></div>'+
+    '</div>'+
+    '<div class="fac-body">'+
+      '<table class="workers"><thead><tr><th>氏名</th><th>最終面談</th><th>次回予定</th>'+
+      '<th class="col-c">問題</th><th class="col-c">判定</th><th></th></tr></thead>'+
+      '<tbody>'+(fac.workers.length?workerRows(fac):'<tr><td colspan="6" class="empty">対象者が登録されていません。</td></tr>')+'</tbody></table>'+
+    '</div></div>';
+}
+function toggleFac(id){document.getElementById('fac-'+id).classList.toggle('open');}
+
+/* ===== 面談票モーダル ===== */
+function openRecord(pid){
+  var entry=WMAP[pid]; if(!entry)return;
+  var w=entry.w, r=w.latest;
+  var body;
+  if(!r){
+    body='<div class="empty">この対象者の面談記録はまだありません。</div>';
+  }else{
+    var rows='';
+    var cats={};ITEMS.forEach(function(it){(cats[it.cat]=cats[it.cat]||[]).push(it);});
+    Object.keys(cats).forEach(function(cat){
+      cats[cat].forEach(function(it,ii){
+        var p=r.problems.find(function(x){return x.code===it.code;});
+        rows+='<tr>'+(ii===0?'<td class="cat-cell" rowspan="'+cats[cat].length+'">'+esc(cat)+'</td>':'')+
+          '<td>'+esc(it.label)+'</td>'+
+          '<td class="yn '+(p?'has':'no')+'">'+(p?'有':'無')+'</td>'+
+          '<td class="pnote">'+(p?esc(extractNote(r,it.label)):'')+'</td></tr>';
+      });
+    });
+    var vio='';
+    if(r.violation){var v=r.violation;
+      vio='<div class="sec-label"><span class="sec-num">4</span>法令違反等への対応</div>'+
+      '<div class="violation"><div class="vh">⑥ 法令違反等の有無：有り</div>'+
+      '<div class="vrow"><div class="vk">①発生年月日</div><div class="vv">'+esc(v.occurred)+'</div></div>'+
+      '<div class="vrow"><div class="vk">②違反事実の内容</div><div class="vv">'+esc(v.detail)+'</div></div>'+
+      '<div class="vrow"><div class="vk">③対応結果</div><div class="vv">'+
+        '<b>ア　本人への対応</b><ul><li class="done">☑ '+esc(v.a||'')+'</li></ul>'+
+        '<b style="display:block;margin-top:8px;">イ　所属機関への対応</b><ul>'+
+        '<li>(ア) 責任者への通知：<span class="done">'+esc(v.notifyDone||'')+'</span>'+(v.notifyDate?'（'+esc(v.notifyDate)+'／'+esc(v.notifyTo||'')+'）':'')+'</li>'+
+        '<li>(イ) 入管への届出案内：<span class="done">'+esc(v.immigGuide||'')+'</span></li></ul>'+
+        '<b style="display:block;margin-top:8px;">ウ　関係行政機関への対応</b><ul>'+
+        '<li><span class="done">'+esc(v.reportDone||'')+'</span>'+(v.reportDate?'（'+esc(v.reportDate)+'／通報先：'+esc(v.reportOffice||'')+'）':'')+'</li></ul>'+
+      '</div></div></div>';
+    }
+    var hist='';
+    if(w.history&&w.history.length>1){
+      hist='<div class="history"><h4>面談履歴</h4>'+w.history.map(function(h){
+        return '<div class="hrow"><span>'+esc(h.date)+'</span>'+statusBadge(h.status)+'</div>';}).join('')+'</div>';
+    }
+    body=
+      '<div class="sec-label"><span class="sec-num">1</span>面談対象者</div>'+
+      '<div class="kv"><div class="k">氏名</div><div class="v">'+esc(w.name)+'　<span style="color:var(--ink-mute);font-size:12px;">'+esc(w.nat)+'</span></div>'+
+      '<div class="k">在留資格</div><div class="v">'+esc(w.zairyu||'')+'</div>'+
+      '<div class="k">面談日</div><div class="v">'+esc(r.date)+'</div></div>'+
+      '<div class="sec-label"><span class="sec-num">2</span>面談対応者</div>'+
+      '<div class="kv"><div class="k">対応者の氏名</div><div class="v">'+esc(r.respondent)+'</div>'+
+      '<div class="k">役職</div><div class="v">'+esc(r.role||'')+'</div></div>'+
+      '<div class="sec-label"><span class="sec-num">3</span>面談結果</div>'+
+      '<table class="result"><thead><tr><th style="width:84px;">面談事項</th><th>面談内容</th>'+
+      '<th style="width:42px;text-align:center;">問題</th><th style="width:230px;">問題の内容</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+      vio+hist+
+      '<div class="modal-foot"><span>作成年月日：'+esc(r.madeOn||'—')+'</span><span>入力：'+esc(r.respondent||'')+'</span></div>';
+  }
+  document.getElementById('modal').innerHTML=
+    '<div class="modal-head"><div><div class="mh-form">参考様式第5-5号</div>'+
+    '<div class="mh-title">定期面談報告書</div>'+
+    '<div class="mh-sub">'+esc(entry.facName)+'　｜　判定：'+LABEL[w.status]+'</div></div>'+
+    '<button class="closex" onclick="closeModal()" aria-label="閉じる">×</button></div>'+
+    '<div class="modal-body">'+body+'</div>';
+  document.getElementById('overlay').classList.add('show');
+  document.body.style.overflow='hidden';
+}
+/* 問題内容テキストから該当項目のメモを拾う（"区分 内容：メモ / ..." 形式） */
+function extractNote(r,label){
+  if(!r.problemNote)return '';
+  var parts=String(r.problemNote).split(' / ');
+  for(var i=0;i<parts.length;i++){ if(parts[i].indexOf(label)>=0){var k=parts[i].indexOf('：');return k>=0?parts[i].slice(k+1):parts[i];} }
+  return r.problemNote;
+}
+function closeModal(){document.getElementById('overlay').classList.remove('show');document.body.style.overflow='';}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});
+</script>
