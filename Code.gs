@@ -337,6 +337,102 @@ function getOptions() {
 }
 
 /*===========================================================
+ * 面談票PDF生成（様式第5-5号）
+ *   管理ページ：requireAdmin_ が通れば任意の記録を出力
+ *   施設ページ：fid+token を検証し、自施設の記録のみ出力
+ *   （施設ページは executeAs=自分 なので google.script.run は
+ *     所有者権限で動くが、下の認可で自施設に限定している）
+ *==========================================================*/
+function makeRecordPdf(recordId, fid, token) {
+  recordId = String(recordId || '');
+  let isAdmin = false;
+  try { requireAdmin_(); isAdmin = true; } catch (e) {}
+  const rec = table_(SHEETS.records).find(r => String(r['記録ID']) === recordId);
+  if (!rec) throw new Error('記録が見つかりません。');
+  if (!isAdmin) {
+    const facAuth = getFacilityByToken_(fid, token);
+    if (!facAuth || String(rec['施設ID']) !== String(facAuth.id)) throw new Error('権限がありません。');
+  }
+  const worker   = table_(SHEETS.workers).find(w => String(w['人材ID']) === String(rec['人材ID'])) || {};
+  const facility = table_(SHEETS.facilities).find(f => String(f['施設ID']) === String(rec['施設ID'])) || {};
+  const model = recordModel_(rec, table_(SHEETS.violations));
+  const html  = buildRecordHtml_(model, worker, facility);
+  const pdf   = Utilities.newBlob(html, 'text/html', 'report.html').getAs('application/pdf');
+  const who   = String(worker['氏名（ローマ字）'] || rec['人材ID'] || '').replace(/\s+/g, '_');
+  const name  = '定期面談報告書_' + who + '_' + String(model.date).replace(/\//g, '') + '.pdf';
+  logAccess_(String(rec['施設ID']), 'pdf', recordId);
+  return { name: name, b64: Utilities.base64Encode(pdf.getBytes()) };
+}
+
+// 問題内容テキスト（"区分 事項：メモ / ..."）から該当事項のメモを取り出す
+function extractNoteFor_(problemNote, label) {
+  if (!problemNote) return '';
+  const parts = String(problemNote).split(' / ');
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i].indexOf(label) >= 0) { const k = parts[i].indexOf('：'); return k >= 0 ? parts[i].slice(k + 1) : parts[i]; }
+  }
+  return '';
+}
+
+function buildRecordHtml_(r, w, f) {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const catCount = {};
+  ITEMS.forEach(it => { catCount[it[1]] = (catCount[it[1]] || 0) + 1; });
+  const seen = {};
+  let body = '';
+  ITEMS.forEach(it => {
+    const p = r.problems.find(x => x.code === it[0]);
+    const note = p ? extractNoteFor_(r.problemNote, it[2]) : '';
+    let catCell = '';
+    if (!seen[it[1]]) { seen[it[1]] = true; catCell = '<td class="cat" rowspan="' + catCount[it[1]] + '">' + esc(it[1]) + '</td>'; }
+    body += '<tr>' + catCell +
+      '<td>' + esc(it[2]) + '</td>' +
+      '<td class="yn' + (p ? ' has' : '') + '">' + (p ? '有' : '無') + '</td>' +
+      '<td>' + esc(note) + '</td></tr>';
+  });
+
+  let vio = '';
+  if (r.violation) {
+    const v = r.violation;
+    vio = '<div class="sec">４ 法令違反等への対応</div>' +
+      '<table class="vio"><tr><td class="vh" colspan="2">⑥ 法令違反等の有無：有り</td></tr>' +
+      '<tr><td class="k">①発生年月日</td><td>' + esc(v.occurred) + '</td></tr>' +
+      '<tr><td class="k">②違反事実の内容</td><td>' + esc(v.detail) + '</td></tr>' +
+      '<tr><td class="k">ア　本人への対応</td><td>' + esc(v.a) + '</td></tr>' +
+      '<tr><td class="k">イ　責任者への通知</td><td>' + esc(v.notifyDone) + (v.notifyDate ? '（' + esc(v.notifyDate) + '／' + esc(v.notifyTo) + '）' : '') + '</td></tr>' +
+      '<tr><td class="k">イ　入管への届出案内</td><td>' + esc(v.immigGuide) + '</td></tr>' +
+      '<tr><td class="k">ウ　関係機関への通報</td><td>' + esc(v.reportDone) + (v.reportDate ? '（' + esc(v.reportDate) + '／通報先：' + esc(v.reportOffice) + '）' : '') + '</td></tr>' +
+      '</table>';
+  }
+
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"><style>' +
+    '@page{size:A4;margin:14mm;} body{font-family:sans-serif;color:#111;font-size:11px;line-height:1.6;margin:0;}' +
+    'h1{font-size:17px;text-align:center;margin:2px 0;letter-spacing:.1em;} .ref{text-align:right;font-size:10px;color:#555;}' +
+    '.sec{font-size:12px;font-weight:bold;background:#1F3864;color:#fff;padding:3px 8px;margin:12px 0 4px;}' +
+    'table{width:100%;border-collapse:collapse;} td,th{border:1px solid #888;padding:4px 6px;vertical-align:top;text-align:left;}' +
+    '.k{background:#f0f0f0;width:24%;font-size:10px;white-space:nowrap;} table.res th{background:#f0f0f0;font-size:10px;}' +
+    'table.res td{font-size:10px;} .cat{background:#fafafa;width:58px;font-weight:bold;} .yn{text-align:center;width:36px;} .yn.has{color:#b42318;font-weight:bold;}' +
+    'table.vio td{border-color:#b42318;font-size:10px;} .vh{background:#fbeae8;color:#b42318;font-weight:bold;}' +
+    '.foot{margin-top:10px;font-size:10px;color:#333;} .foot td{border:none;padding:2px 0;}' +
+    '</style></head><body>' +
+    '<div class="ref">参考様式第5-5号</div>' +
+    '<h1>定期面談報告書</h1>' +
+    '<div class="sec">１　面談対象者</div>' +
+    '<table><tr><td class="k">氏名</td><td>' + esc(w['氏名（ローマ字）']) + '</td><td class="k">国籍</td><td>' + esc(w['国籍']) + '</td></tr>' +
+    '<tr><td class="k">在留資格</td><td>' + esc(w['在留資格'] || '特定技能1号') + '</td><td class="k">面談日</td><td>' + esc(r.date) + '</td></tr>' +
+    '<tr><td class="k">受入機関（施設）</td><td colspan="3">' + esc(f['施設名']) + '　' + esc(f['所在地'] || '') + '</td></tr></table>' +
+    '<div class="sec">２　面談対応者</div>' +
+    '<table><tr><td class="k">氏名</td><td>' + esc(r.respondent) + '</td><td class="k">役職</td><td>' + esc(r.role) + '</td></tr></table>' +
+    '<div class="sec">３　面談結果</div>' +
+    '<table class="res"><tr><th class="cat">区分</th><th>確認事項</th><th class="yn">問題</th><th>問題の内容</th></tr>' + body + '</table>' +
+    (r.other ? '<table style="margin-top:6px;"><tr><td class="k">その他特筆事項</td><td>' + esc(r.other) + '</td></tr></table>' : '') +
+    vio +
+    '<table class="foot"><tr><td>作成年月日：' + esc(r.madeOn || '') + '　／　次回面談予定日：' + esc(r.nextDue || '') + '</td>' +
+    '<td style="text-align:right;">入力者：' + esc(r.respondent || '') + '</td></tr></table>' +
+    '</body></html>';
+}
+
+/*===========================================================
  * 補助
  *==========================================================*/
 function include(name) { return HtmlService.createHtmlOutputFromFile(name).getContent(); }

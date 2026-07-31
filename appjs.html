@@ -110,7 +110,10 @@ function openRecord(pid){
     '<div class="modal-head"><div><div class="mh-form">参考様式第5-5号</div>'+
     '<div class="mh-title">定期面談報告書</div>'+
     '<div class="mh-sub">'+esc(entry.facName)+'　｜　判定：'+LABEL[w.status]+'</div></div>'+
-    '<button class="closex" onclick="closeModal()" aria-label="閉じる">×</button></div>'+
+    '<div class="mh-actions">'+
+      (r?'<button class="pdfbtn" id="pdfBtn" onclick="downloadPdf(\''+r.recordId+'\')">PDF保存</button>':'')+
+      '<button class="closex" onclick="closeModal()" aria-label="閉じる">×</button>'+
+    '</div></div>'+
     '<div class="modal-body">'+body+'</div>';
   document.getElementById('overlay').classList.add('show');
   document.body.style.overflow='hidden';
@@ -124,4 +127,27 @@ function extractNote(r,label){
 }
 function closeModal(){document.getElementById('overlay').classList.remove('show');document.body.style.overflow='';}
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});
+
+/* ===== 面談票PDF保存 ===== */
+function downloadPdf(recordId){
+  var btn=document.getElementById('pdfBtn');
+  if(btn){btn.disabled=true;btn.dataset.t=btn.textContent;btn.textContent='作成中…';}
+  var q; try{ q=new URLSearchParams(window.location.search); }catch(e){ q=null; }
+  var fid=q?(q.get('fid')||''):'', token=q?(q.get('token')||''):'';
+  function done(){ if(btn){btn.disabled=false;btn.textContent=btn.dataset.t||'PDF保存';} }
+  google.script.run.withSuccessHandler(function(res){
+    try{
+      var bin=atob(res.b64), len=bin.length, arr=new Uint8Array(len);
+      for(var i=0;i<len;i++) arr[i]=bin.charCodeAt(i);
+      var blob=new Blob([arr],{type:'application/pdf'});
+      var url=URL.createObjectURL(blob);
+      var a=document.createElement('a'); a.href=url; a.download=res.name;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){URL.revokeObjectURL(url);},2000);
+    }catch(e){ alert('PDFの処理に失敗しました：'+e); }
+    done();
+  }).withFailureHandler(function(err){
+    alert('PDF作成に失敗しました：'+((err&&err.message)?err.message:err)); done();
+  }).makeRecordPdf(recordId, fid, token);
+}
 </script>
